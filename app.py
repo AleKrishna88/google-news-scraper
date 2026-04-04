@@ -175,7 +175,7 @@ CONTENUTO:
     prompt = f"""
 Sei un content writer SEO esperto.
 
-Scrivi un contenuto SEO completo per la keyword:
+Scrivi un contenuto SEO completo sul tema:
 
 {keyword}
 
