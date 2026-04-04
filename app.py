@@ -1,3 +1,4 @@
+import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
@@ -9,7 +10,7 @@ from io import BytesIO
 # GOOGLE NEWS RESULTS
 # ======================
 
-def get_google_news_results(keyword: str, num_results: int, serpapi_key: str, hl: str, gl: str):
+def get_google_news_results(keyword, num_results, serpapi_key, hl, gl):
 
     url = "https://serpapi.com/search.json"
 
@@ -21,7 +22,7 @@ def get_google_news_results(keyword: str, num_results: int, serpapi_key: str, hl
         "api_key": serpapi_key
     }
 
-    response = requests.get(url, params=params, timeout=30)
+    response = requests.get(url, params=params)
     response.raise_for_status()
 
     data = response.json()
@@ -31,15 +32,6 @@ def get_google_news_results(keyword: str, num_results: int, serpapi_key: str, hl
     competitors = []
     seen = set()
 
-    blocked_domains = [
-        "youtube.com",
-        "youtu.be",
-        "tiktok.com",
-        "instagram.com",
-        "facebook.com",
-        "pinterest.com"
-    ]
-
     for item in news_results:
 
         link = item.get("link")
@@ -47,19 +39,16 @@ def get_google_news_results(keyword: str, num_results: int, serpapi_key: str, hl
         if not link:
             continue
 
-        normalized_link = link.strip().rstrip("/")
+        normalized = link.strip().rstrip("/")
 
-        if normalized_link in seen:
+        if normalized in seen:
             continue
 
-        if any(domain in normalized_link for domain in blocked_domains):
-            continue
-
-        seen.add(normalized_link)
+        seen.add(normalized)
 
         competitors.append({
             "title": item.get("title", ""),
-            "link": normalized_link,
+            "link": normalized,
             "source": item.get("source", "")
         })
 
@@ -70,30 +59,27 @@ def get_google_news_results(keyword: str, num_results: int, serpapi_key: str, hl
 
 
 # ======================
-# PAGE SCRAPING
+# SCRAPE PAGE
 # ======================
 
-def fetch_page(url: str):
+def fetch_page(url):
 
     try:
 
         resp = requests.get(
             url,
-            timeout=20,
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                )
-            }
+                "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            },
+            timeout=15
         )
 
         resp.raise_for_status()
 
         html = resp.text
 
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html, "lxml")
 
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
@@ -106,9 +92,9 @@ def fetch_page(url: str):
         return "", ""
 
 
-def extract_metadata(html: str):
+def extract_metadata(html):
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
 
     title = soup.title.string.strip() if soup.title and soup.title.string else ""
 
@@ -116,6 +102,7 @@ def extract_metadata(html: str):
     h1 = h1_tag.get_text(strip=True) if h1_tag else ""
 
     meta_desc = ""
+
     meta = soup.find("meta", attrs={"name": "description"})
 
     if meta and "content" in meta.attrs:
@@ -125,16 +112,16 @@ def extract_metadata(html: str):
 
 
 # ======================
-# PARSE GPT OUTPUT
+# GPT PARSER
 # ======================
 
-def parse_generated_content(content: str):
+def parse_generated_content(content):
 
     title = ""
     meta = ""
     article = content
 
-    if "TITLE TAG:" in content and "META DESCRIPTION:" in content and "ARTICLE HTML:" in content:
+    if "TITLE TAG:" in content:
 
         after_title = content.split("TITLE TAG:", 1)[1]
         title = after_title.split("META DESCRIPTION:", 1)[0].strip()
@@ -148,7 +135,7 @@ def parse_generated_content(content: str):
 
 
 # ======================
-# ARTICLE GENERATION
+# GENERATE ARTICLE
 # ======================
 
 def generate_article(keyword, competitors, openai_key, language):
@@ -175,38 +162,25 @@ CONTENUTO:
     prompt = f"""
 Sei un content writer SEO esperto.
 
-Scrivi un contenuto SEO completo sul tema:
+Scrivi un contenuto SEO completo per la keyword:
 
 {keyword}
 
-Language code della ricerca: {language}
+Lingua: {language}
 
 Il risultato deve contenere:
 
 TITLE TAG (max 60 caratteri)
 META DESCRIPTION (max 155 caratteri)
-ARTICOLO HTML (800-1500 parole)
-
-L'articolo deve essere scritto in HTML pronto per CMS.
+ARTICOLO HTML (800-1200 parole)
 
 Regole HTML:
 
 - usa <h2> e <h3>
 - usa <p>
-- usa <ul> <ol>
+- usa <ul> e <ol>
 - usa <strong>
-- usa <table> se utile
-- NON includere <html> <body>
-
-Requisiti editoriali:
-
-- Usa heading formulati come query di ricerca
-- Testo discorsivo e informativo
-- Inserisci elenchi quando utile
-- Evidenzia le entità chiave con <strong>
-- Evita contenuto di riempimento
-
-Al termine inserisci almeno 4 FAQ in formato Q&A.
+- NON includere <html> o <body>
 
 COMPETITOR DATA:
 {merged}
@@ -229,7 +203,7 @@ ARTICLE HTML:
         temperature=0.7
     )
 
-    content = response.choices[0].message.content or ""
+    content = response.choices[0].message.content
 
     return parse_generated_content(content)
 
@@ -251,44 +225,70 @@ def create_word_file(title_tag, meta_description, article):
     doc.add_heading("HTML Article", level=2)
     doc.add_paragraph(article)
 
-    doc.save("seo_article.docx")
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
 
-    print("\nFile salvato: seo_article.docx")
+    return buffer
 
 
 # ======================
-# MAIN
+# STREAMLIT UI
 # ======================
 
-def main():
+st.title("Google News SEO Article Generator")
 
-    keyword = input("Keyword: ")
-    serpapi_key = input("SerpAPI key: ")
-    openai_key = input("OpenAI key: ")
+st.sidebar.title("API Keys")
 
-    language = "it"
-    country = "it"
-    num_results = 5
+SERPAPI_KEY = st.sidebar.text_input("SerpAPI Key", type="password")
+OPENAI_KEY = st.sidebar.text_input("OpenAI Key", type="password")
 
-    print("\nRecupero Google News results...\n")
+keyword = st.text_input("Keyword")
+
+num_results = st.slider(
+    "Numero articoli da analizzare",
+    1,
+    10,
+    5
+)
+
+country = st.text_input("Country code", "it")
+language = st.text_input("Language code", "it")
+
+generate = st.button("Genera contenuto")
+
+
+# ======================
+# MAIN LOGIC
+# ======================
+
+if generate:
+
+    if not SERPAPI_KEY or not OPENAI_KEY:
+
+        st.error("Inserisci le API key.")
+        st.stop()
+
+    if not keyword:
+
+        st.error("Inserisci una keyword.")
+        st.stop()
+
+    st.write("Recupero Google News...")
 
     competitors = get_google_news_results(
         keyword,
         num_results,
-        serpapi_key,
+        SERPAPI_KEY,
         language,
         country
     )
-
-    if not competitors:
-        print("Nessun risultato trovato.")
-        return
 
     enriched = []
 
     for comp in competitors:
 
-        print("Scraping:", comp["link"])
+        st.write("Scraping:", comp["link"])
 
         html, text = fetch_page(comp["link"])
 
@@ -302,20 +302,34 @@ def main():
             "text": text
         })
 
-    print("\nGenerazione articolo...\n")
+    st.write("Generazione articolo...")
 
     title_tag, meta_description, article = generate_article(
         keyword,
         enriched,
-        openai_key,
+        OPENAI_KEY,
         language
     )
 
-    print("\nTITLE TAG:\n", title_tag)
-    print("\nMETA DESCRIPTION:\n", meta_description)
+    st.subheader("Title Tag")
+    st.write(title_tag)
 
-    create_word_file(title_tag, meta_description, article)
+    st.subheader("Meta Description")
+    st.write(meta_description)
 
+    st.subheader("Articolo HTML")
 
-if __name__ == "__main__":
-    main()
+    st.code(article, language="html")
+
+    word_file = create_word_file(
+        title_tag,
+        meta_description,
+        article
+    )
+
+    st.download_button(
+        label="Scarica Word",
+        data=word_file,
+        file_name="seo_article.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
