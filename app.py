@@ -181,6 +181,8 @@ ARTICOLO HTML (800-1200 parole)
 Regole HTML:
 
 - inizia l'articolo con questo H1 esatto: <h1>{target_h1}</h1>
+- integra sempre la keyword in maniera naturale, senza forzature
+- basati sulle informazioni estrpolate dallo scraping
 - usa <h2> e <h3>
 - usa <p>
 - usa <ul> e <ol>
