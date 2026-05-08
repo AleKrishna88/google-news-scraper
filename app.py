@@ -1,8 +1,8 @@
 import streamlit as st
 import requests
+import re
 from bs4 import BeautifulSoup
 from openai import OpenAI
-from docx import Document
 from io import BytesIO
 
 
@@ -138,7 +138,7 @@ def parse_generated_content(content):
 # GENERATE ARTICLE
 # ======================
 
-def generate_article(keyword, competitors, openai_key, language):
+def generate_article(keyword, target_h1, custom_prompt, competitors, openai_key, language):
 
     client = OpenAI(api_key=openai_key)
 
@@ -166,6 +166,10 @@ Scrivi un contenuto SEO completo per la keyword:
 
 {keyword}
 
+H1 del contenuto da redigere:
+
+{target_h1}
+
 Lingua: {language}
 
 Il risultato deve contenere:
@@ -176,11 +180,15 @@ ARTICOLO HTML (800-1200 parole)
 
 Regole HTML:
 
+- inizia l'articolo con questo H1 esatto: <h1>{target_h1}</h1>
 - usa <h2> e <h3>
 - usa <p>
 - usa <ul> e <ol>
 - usa <strong>
 - NON includere <html> o <body>
+
+Customizzazioni ad hoc da integrare alle regole precedenti:
+{custom_prompt if custom_prompt else "Nessuna customizzazione aggiuntiva."}
 
 COMPETITOR DATA:
 {merged}
@@ -209,27 +217,37 @@ ARTICLE HTML:
 
 
 # ======================
-# WORD EXPORT
+# TXT EXPORT
 # ======================
 
-def create_word_file(title_tag, meta_description, article):
+def create_txt_file(title_tag, h1, meta_description, article):
 
-    doc = Document()
+    content = f"""Title Tag
+{title_tag}
 
-    doc.add_heading("Title Tag", level=2)
-    doc.add_paragraph(title_tag)
+H1
+{h1}
 
-    doc.add_heading("Meta Description", level=2)
-    doc.add_paragraph(meta_description)
+Meta Description
+{meta_description}
 
-    doc.add_heading("HTML Article", level=2)
-    doc.add_paragraph(article)
+HTML Article
+{article}
+"""
 
     buffer = BytesIO()
-    doc.save(buffer)
+    buffer.write(content.encode("utf-8"))
     buffer.seek(0)
 
     return buffer
+
+
+def create_txt_filename(h1):
+
+    filename = re.sub(r'[<>:"/\\|?*]', "", h1)
+    filename = re.sub(r"\s+", " ", filename).strip()
+
+    return f"{filename or 'seo_article'}.txt"
 
 
 # ======================
@@ -244,6 +262,13 @@ SERPAPI_KEY = st.sidebar.text_input("SerpAPI Key", type="password")
 OPENAI_KEY = st.sidebar.text_input("OpenAI Key", type="password")
 
 keyword = st.text_input("Keyword")
+
+target_h1 = st.text_input("H1 del contenuto da redigere")
+
+custom_prompt = st.text_area(
+    "Customizzazioni prompt ad hoc",
+    help="Inserisci eventuali indicazioni aggiuntive: tono, pubblico, angolazione, CTA, sezioni da includere o evitare."
+)
 
 num_results = st.slider(
     "Numero articoli da analizzare",
@@ -272,6 +297,11 @@ if generate:
     if not keyword:
 
         st.error("Inserisci una keyword.")
+        st.stop()
+
+    if not target_h1:
+
+        st.error("Inserisci l'H1 del contenuto da redigere.")
         st.stop()
 
     st.write("Recupero Google News...")
@@ -306,6 +336,8 @@ if generate:
 
     title_tag, meta_description, article = generate_article(
         keyword,
+        target_h1,
+        custom_prompt,
         enriched,
         OPENAI_KEY,
         language
@@ -317,19 +349,23 @@ if generate:
     st.subheader("Meta Description")
     st.write(meta_description)
 
+    st.subheader("H1")
+    st.write(target_h1)
+
     st.subheader("Articolo HTML")
 
     st.code(article, language="html")
 
-    word_file = create_word_file(
+    txt_file = create_txt_file(
         title_tag,
+        target_h1,
         meta_description,
         article
     )
 
     st.download_button(
-        label="Scarica Word",
-        data=word_file,
-        file_name="seo_article.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        label="Scarica TXT",
+        data=txt_file,
+        file_name=create_txt_filename(target_h1),
+        mime="text/plain"
     )
